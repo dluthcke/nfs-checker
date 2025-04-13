@@ -1,24 +1,51 @@
+version: '3.8'
 services:
   nfs-checker:
     image: nfs-checker:latest
     restart: always
     environment:
-      - NFS1=192.168.1.100:/path/to/share1
-      - NFS2=192.168.1.100:/path/to/share2
-      - TIMEOUT=120  # Optional: seconds to wait before failing (omit for indefinite)
+      # For CI, uses mock nfs-server. For local, set to your NFS server, e.g.:
+      # - NFS1=server:/path/to/share
+      - NFS1=nfs-server:/export/test
+      - TIMEOUT=60  # Shorter for CI
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/nfs-ready"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 10s
+    networks:
+      - app-network
 
-    app:
-      # Replace 'hello-world' with your desired image (e.g., 'nginx:latest' to serve files from /mnt/nfs1)
-      image: hello-world
-      restart: always
-      depends_on:
-        nfs-checker:
-          condition: service_healthy
-      volumes:
-        - /mnt/nfs1:/mnt/nfs1:ro  # Mounts NFS share; not used by hello-world but included for consistency
+  app:
+    # Replace 'hello-world' with your desired image (e.g., 'nginx:latest' to serve files from /mnt/nfs1)
+    image: hello-world
+    restart: always
+    depends_on:
+      nfs-checker:
+        condition: service_healthy
+    volumes:
+      - /mnt/nfs1:/mnt/nfs1:ro  # Mounts NFS share; not used by hello-world but included for consistency
+    networks:
+      - app-network
+
+  nfs-server:
+    image: itsthenetwork/nfs-server-alpine:latest
+    environment:
+      - SHARED_DIRECTORY=/export
+    volumes:
+      - nfs-data:/export
+    ports:
+      - "2049:2049"
+    cap_add:
+      - SYS_ADMIN
+      - SETPCAP
+    networks:
+      - app-network
+
+volumes:
+  nfs-data:
+
+networks:
+  app-network:
+    driver: bridge
