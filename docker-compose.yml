@@ -1,13 +1,10 @@
-version: '3.8'
 services:
   nfs-checker:
     image: nfs-checker:latest
     restart: always
     environment:
-      # For CI, uses mock nfs-server. For local, set to your NFS server, e.g.:
-      # - NFS1=server:/path/to/share
-      - NFS1=apollo.luthcke.com:/mnt/storage/Docker
-      - TIMEOUT=60  # Shorter for CI
+      - NFS1=nfs-server:/export/test
+      - TIMEOUT=60
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/nfs-ready"]
       interval: 10s
@@ -16,36 +13,33 @@ services:
       start_period: 10s
     networks:
       - app-network
-
   app:
-    # Replace 'hello-world' with your desired image (e.g., 'nginx:latest' to serve files from /mnt/nfs1)
     image: hello-world
     restart: always
     depends_on:
       nfs-checker:
         condition: service_healthy
     volumes:
-      - /mnt/nfs1:/mnt/nfs1:ro  # Mounts NFS share; not used by hello-world but included for consistency
+      - /mnt/nfs1:/mnt/nfs1:ro
     networks:
       - app-network
-
   nfs-server:
     image: itsthenetwork/nfs-server-alpine:latest
     environment:
-      - SHARED_DIRECTORY=/export
+      - SHARED_DIRECTORY=/export/test
     volumes:
-      - nfs-data:/export
+      - nfs-data:/export/test
     ports:
       - "2049:2049"
+      - "111:111"
+      - "20048:20048"
     cap_add:
       - SYS_ADMIN
       - SETPCAP
     networks:
       - app-network
-
 volumes:
   nfs-data:
-
 networks:
   app-network:
     driver: bridge
