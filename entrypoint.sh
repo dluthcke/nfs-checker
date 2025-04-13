@@ -1,0 +1,84 @@
+#!/bin/bash
+INTERVAL=30  # Retry interval in seconds for indefinite mode
+
+# Collect NFS mounts from environment variables (NFS1, NFS2, etc.)
+declare -A MOUNTS
+for var in $(env | grep '^NFS[0-9]*=' | cut -d= -f1); do
+    MOUNT_POINT="/mnt/$(echo $var | tr '[:upper:]' '[:lower:]')"  # e.g., NFS1 -> /mnt/nfs1
+    MOUNTS["$MOUNT_POINT"]="${!var}"  # e.g., 192.168.1.100:/path/to/share1
+done
+
+if [ ${#MOUNTS[@]} -eq 0 ]; then
+    echo "No NFS mounts defined (expecting NFS1, NFS2, etc.)"
+    exit 1
+fi
+
+# Extract unique NFS servers for checking
+declare -A SERVERS
+for NFS_SHARE in "${MOUNTS[@]}"; do
+    SERVER="${NFS_SHARE%%:*}"  # Extract host (e.g., 192.168.1.100)
+    SERVERS["$SERVER"]=1
+done
+
+# Check availability of all NFS servers and shares
+while true; do
+    ALL_READY=1
+    ELAPSED=0
+
+    # Check each server
+    for SERVER in "${!SERVERS[@]}"; do
+        if ! nc -z "$SERVER" 2049 2>/dev/null; then
+            echo "NFS server $SERVER:2049 not reachable"
+            ALL_READY=0
+            break
+        fi
+    done
+
+    # If servers are reachable, verify each share
+    if [ "$ALL_READY" -eq 1 ]; then
+        for MOUNT_POINT in "${!MOUNTS[@]}"; do
+            NFS_SHARE="${MOUNTS[$MOUNT_POINT]}"
+            echo "Checking share $NFS_SHARE for $MOUNT_POINT..."
+
+            # Create temporary mount point
+            TEMP_MOUNT="/tmp/nfs-checker-$RANDOM"
+            mkdir -p "$TEMP_MOUNT"
+
+            # Attempt to mount temporarily
+            if ! mount -t nfs -o soft,timeo=100,retrans=2 "$NFS_SHARE" "$TEMP_MOUNT" 2>/dev/null; then
+                echo "Share $NFS_SHARE is not accessible"
+                ALL_READY=0
+                rmdir "$TEMP_MOUNT" 2>/dev/null
+                break
+            fi
+
+            # Unmount immediately
+            umount "$TEMP_MOUNT" 2>/dev/null
+            rmdir "$TEMP_MOUNT" 2>/dev/null
+            echo "Share $NFS_SHARE is accessible"
+        done
+    fi
+
+    # If all shares are ready, proceed
+    if [ "$ALL_READY" -eq 1 ]; then
+        echo "All NFS shares are ready"
+        touch /tmp/nfs-ready  # Signal success for health check
+        break
+    fi
+
+    # Check timeout if set
+    if [ -n "$TIMEOUT" ]; then
+        ELAPSED=$((ELAPSED + INTERVAL))
+        if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+            echo "Timeout ($TIMEOUT seconds) waiting for NFS shares"
+            exit  Web1
+        fi
+    fi
+
+    echo "Retrying in $INTERVAL seconds..."
+    sleep "$INTERVAL"
+done
+
+# Signal readiness and keep container running
+echo "NFS checker completed successfully"
+exec "$@"

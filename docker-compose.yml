@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+  nfs-checker:
+    image: nfs-checker:latest
+    restart: always
+    environment:
+      - NFS1=192.168.1.100:/path/to/share1
+      - NFS2=192.168.1.100:/path/to/share2
+      - TIMEOUT=120  # Optional: seconds to wait before failing (omit for indefinite)
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/nfs-ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+
+  app:
+    image: nginx:latest
+    restart: always
+    depends_on:
+      nfs-checker:
+        condition: service_healthy
+    volumes:
+      - /mnt/nfs1:/usr/share/nginx/html:ro  # Serve files from NFS mount
+    ports:
+      - "8080:80"  # Access at http://localhost:8080
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
