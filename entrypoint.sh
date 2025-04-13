@@ -5,7 +5,7 @@ INTERVAL=30  # Retry interval in seconds for indefinite mode
 declare -A MOUNTS
 for var in $(env | grep '^NFS[0-9]*=' | cut -d= -f1); do
     MOUNT_POINT="/mnt/$(echo $var | tr '[:upper:]' '[:lower:]')"  # e.g., NFS1 -> /mnt/nfs1
-    MOUNTS["$MOUNT_POINT"]="${!var}"  # e.g., 192.168.1.100:/path/to/share1
+    MOUNTS["$MOUNT_POINT"]="${!var}"
 done
 
 if [ ${#MOUNTS[@]} -eq 0 ]; then
@@ -16,8 +16,9 @@ fi
 # Extract unique NFS servers for checking
 declare -A SERVERS
 for NFS_SHARE in "${MOUNTS[@]}"; do
-    SERVER="${NFS_SHARE%%:*}"  # Extract host (e.g., 192.168.1.100)
-    SERVERS["$SERVER"]=1
+    SERVER="${NFS_SHARE%%:*}"  # Extract host
+    SHARE_PATH="${NFS_SHARE#*:}"  # Extract path
+    SERVERS["$SERVER"]="${SERVERS[$SERVER]:+$SERVERS[$SERVER],}$SHARE_PATH"
 done
 
 # Check availability of all NFS servers and shares
@@ -25,39 +26,35 @@ while true; do
     ALL_READY=1
     ELAPSED=0
 
-    # Check each server
+    # Check each server and its shares
     for SERVER in "${!SERVERS[@]}"; do
+        # Verify NFS port is open
         if ! nc -z "$SERVER" 2049 2>/dev/null; then
             echo "NFS server $SERVER:2049 not reachable"
             ALL_READY=0
             break
         fi
-    done
 
-    # If servers are reachable, verify each share
-    if [ "$ALL_READY" -eq 1 ]; then
-        for MOUNT_POINT in "${!MOUNTS[@]}"; do
-            NFS_SHARE="${MOUNTS[$MOUNT_POINT]}"
-            echo "Checking share $NFS_SHARE for $MOUNT_POINT..."
+        # Get expected shares for this server
+        IFS=',' read -ra EXPECTED_SHARES <<< "${SERVERS[$SERVER]}"
 
-            # Create temporary mount point
-            TEMP_MOUNT="/tmp/nfs-checker-$RANDOM"
-            mkdir -p "$TEMP_MOUNT"
+        # Verify shares are exported
+        if ! SHOWMOUNT_OUTPUT=$(showmount -e "$SERVER" 2>/dev/null); then
+            echo "Failed to query exports from $SERVER"
+            ALL_READY=0
+            break
+        fi
 
-            # Attempt to mount temporarily
-            if ! mount -t nfs -o soft,timeo=100,retrans=2 "$NFS_SHARE" "$TEMP_MOUNT" 2>/dev/null; then
-                echo "Share $NFS_SHARE is not accessible"
+        # Check each expected share
+        for SHARE_PATH in "${EXPECTED_SHARES[@]}"; do
+            if ! echo "$SHOWMOUNT_OUTPUT" | grep -q "^$SHARE_PATH "; then
+                echo "Share $SHARE_PATH not found in exports from $SERVER"
                 ALL_READY=0
-                rmdir "$TEMP_MOUNT" 2>/dev/null
-                break
+            else
+                echo "Share $SHARE_PATH is accessible on $SERVER"
             fi
-
-            # Unmount immediately
-            umount "$TEMP_MOUNT" 2>/dev/null
-            rmdir "$TEMP_MOUNT" 2>/dev/null
-            echo "Share $NFS_SHARE is accessible"
         done
-    fi
+    done
 
     # If all shares are ready, proceed
     if [ "$ALL_READY" -eq 1 ]; then
@@ -71,7 +68,7 @@ while true; do
         ELAPSED=$((ELAPSED + INTERVAL))
         if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
             echo "Timeout ($TIMEOUT seconds) waiting for NFS shares"
-            exit  Web1
+            exit 1
         fi
     fi
 
