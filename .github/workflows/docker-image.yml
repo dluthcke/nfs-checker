@@ -37,6 +37,6 @@ jobs:
 
       # Clean up
       - name: Clean up
-        if: always
+        if: always()  # Fixed: Use always() instead of always
         run: |
           docker-compose down -v
