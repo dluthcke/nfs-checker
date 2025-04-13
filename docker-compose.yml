@@ -6,7 +6,7 @@ services:
     environment:
       # For CI, uses mock nfs-server. For local, set to your NFS server, e.g.:
       # - NFS1=server:/path/to/share
-      - NFS1=nfs-server:/export/test
+      - NFS1=apollo.luthcke.com:/mnt/storage/Docker
       - TIMEOUT=60  # Shorter for CI
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/nfs-ready"]

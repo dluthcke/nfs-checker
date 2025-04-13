@@ -13,30 +13,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Set up Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build nfs-checker image
+      - name: Install docker-compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
       - name: Build nfs-checker image
         run: |
           docker build -t nfs-checker:latest ./nfs-checker
 
-      # Run docker-compose to test
       - name: Run docker-compose
         run: |
           docker-compose up -d
-          # Wait for nfs-checker to become healthy
           timeout 60s bash -c "until docker inspect --format='{{.State.Health.Status}}' $(docker-compose ps -q nfs-checker) | grep -q 'healthy'; do sleep 5; done"
-          # Verify app ran
           docker-compose logs app | grep "Hello from Docker!"
 
-      # Clean up
       - name: Clean up
-        if: always()  # Fixed: Use always() instead of always
+        if: always()
         run: |
           docker-compose down -v
